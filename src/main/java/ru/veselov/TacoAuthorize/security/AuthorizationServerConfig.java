@@ -19,6 +19,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.authorization.client.InMemoryRegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
+import org.springframework.security.oauth2.server.authorization.config.ClientSettings;
 import org.springframework.security.web.SecurityFilterChain;
 
 import java.security.KeyPair;
@@ -63,9 +64,7 @@ public class AuthorizationServerConfig {
                         .scope("writeIngredients")
                         .scope("deleteIngredients")
                         .scope(OidcScopes.OPENID)
-                        .clientSettings(clientSettings -> {
-                            clientSettings.requireUserConsent(true);//здесь мы запрашиваем явного согласия перед предоставлением доступа
-                        }).build();
+                        .clientSettings(ClientSettings.builder().requireAuthorizationConsent(true).build()).build();
 
 
         return new InMemoryRegisteredClientRepository(registeredClient);
