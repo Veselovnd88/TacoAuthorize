@@ -1,0 +1,6 @@
+curl localhost:9000/oauth2/token \
+-H"Content-type: application/x-www-form-urlencoded" \
+-d"grant_type=authorization_code" \
+-d"redirect_uri=http://127.0.0.1:9090/login/oauth2/code/taco-admin-client"\
+-d"code=client_id=taco-admin-client&redirect_uri=http://127.0.0.1:9090/login/oauth2/code/taco-admin-client&-scope=writeIngredients+deleteIngredients" \
+-u taco-admin-client:secret
