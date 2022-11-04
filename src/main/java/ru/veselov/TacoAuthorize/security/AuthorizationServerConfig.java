@@ -2,6 +2,7 @@ package ru.veselov.TacoAuthorize.security;
 
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
+import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
 import org.springframework.context.annotation.Bean;
@@ -11,6 +12,9 @@ import org.springframework.core.annotation.Order;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
+import org.springframework.security.core.userdetails.User;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
@@ -21,7 +25,9 @@ import org.springframework.security.oauth2.server.authorization.client.Registere
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.config.ClientSettings;
 import org.springframework.security.oauth2.server.authorization.config.ProviderSettings;
+import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -30,84 +36,77 @@ import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.util.UUID;
 
-@Configuration(proxyBeanMethods = false)
+@Configuration
 public class AuthorizationServerConfig {
 
     @Bean
-    @Order(Ordered.HIGHEST_PRECEDENCE)//гарантирует что если будут определены другие бины такого же типа
-    //то данный компонент будет иметь приоритет над ними
+    @Order(1)
     public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http)
-        throws Exception {
-        OAuth2AuthorizationServerConfiguration//репозиторий клиентов, которые могут запрашивать
-                // авторизацию от имени пользователей //TODO почитать подробней
-                .applyDefaultSecurity(http);
-        return http
-                .formLogin(Customizer.withDefaults())//TODO почитать подробней
-                .build();
+            throws Exception {
+        OAuth2AuthorizationServerConfiguration.applyDefaultSecurity(http);
+        http
+                // Redirect to the login page when not authenticated from the
+                // authorization endpoint
+                .exceptionHandling((exceptions) -> exceptions
+                        .authenticationEntryPoint(
+                                new LoginUrlAuthenticationEntryPoint("/login"))
+                );
+
+        return http.build();
     }
 
-    /*Отсюда мы получаем сведения о клиентах, здесь реализуем репозиторий в памяти*/
-    @Bean
-    public RegisteredClientRepository registeredClientRepository(PasswordEncoder encoder){
-        RegisteredClient registeredClient=
-                RegisteredClient.withId(UUID.randomUUID().toString())//случайный идентификатор
-                        .clientId("taco-admin-client")//имя клиента (аналог имени пользователя)
-                        .clientSecret(encoder.encode("secret"))//пароль
-                        .clientAuthenticationMethod(
-                                ClientAuthenticationMethod.CLIENT_SECRET_BASIC
-                        )
-                        .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)//используется код авторизации
-                        //и токен обновления
-                        .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
-                        //зарегистрированные адреса куда будет перенаправлен клиент после предоставления авторизации
-                        .redirectUri("http://127.0.0.1:9090/login/oauth2/code/taco-admin-client")
-                        //области действия авторизации OAUTH
-                        .scope("writeIngredients")
-                        .scope("deleteIngredients")
-                        .scope(OidcScopes.OPENID)
-                        .clientSettings(ClientSettings.builder().requireAuthorizationConsent(true).build()).build();
 
+    @Bean
+    public RegisteredClientRepository registeredClientRepository() {
+        RegisteredClient registeredClient = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId("messaging-client")
+                .clientSecret("{noop}secret")
+                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
+                .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
+                .redirectUri("http://127.0.0.1:8080/login/oauth2/code/messaging-client-oidc")
+                .redirectUri("http://127.0.0.1:8080/authorized")
+                .scope(OidcScopes.OPENID)
+                .scope("message.read")
+                .scope("message.write")
+                .clientSettings(ClientSettings.builder().requireAuthorizationConsent(true).build())
+                .build();
 
         return new InMemoryRegisteredClientRepository(registeredClient);
     }
-    /*Бины для создания Json web Key JWK
-    * Создаются пары ключей по 2048 бит, которыми будут подписываться ключи
-    * Токен подписывается закрытым ключом, но для проверки достоверности нужно получить открытый ключ
-    * с сервера авторизации*/
-    @Bean
-    public JWKSource<SecurityContext> jwkSource() throws NoSuchAlgorithmException{
-        RSAKey rsaKey = generateRsa();
-        JWKSet jwkSet = new JWKSet(rsaKey);
-        return (jwkSelector,securityContext)->
-            jwkSelector.select(jwkSet);
-    }
-    private static RSAKey generateRsa() throws NoSuchAlgorithmException{
-        KeyPair keyPair = AuthorizationServerConfig.generateRsaKey();
-        RSAPublicKey rsaPublicKey = (RSAPublicKey) keyPair.getPublic();
-        RSAPrivateKey rsaPrivateKey = (RSAPrivateKey) keyPair.getPrivate();
-        return new RSAKey.Builder(rsaPublicKey).privateKey(rsaPrivateKey)
-                .keyID(UUID.randomUUID().toString())
-                .build();
-    }
-    private static KeyPair generateRsaKey() throws NoSuchAlgorithmException{
-        KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("RSA");
-        keyPairGenerator.initialize(2048);
-        return keyPairGenerator.generateKeyPair();
-    }
 
     @Bean
-    public JwtDecoder jwtDecoder(JWKSource<SecurityContext> jwkSource){
-        return  OAuth2AuthorizationServerConfiguration.jwtDecoder(jwkSource);
+    public JWKSource<SecurityContext> jwkSource() {
+        KeyPair keyPair = generateRsaKey();
+        RSAPublicKey publicKey = (RSAPublicKey) keyPair.getPublic();
+        RSAPrivateKey privateKey = (RSAPrivateKey) keyPair.getPrivate();
+        RSAKey rsaKey = new RSAKey.Builder(publicKey)
+                .privateKey(privateKey)
+                .keyID(UUID.randomUUID().toString())
+                .build();
+        JWKSet jwkSet = new JWKSet(rsaKey);
+        return new ImmutableJWKSet<>(jwkSet);
+    }
+
+    private static KeyPair generateRsaKey() {
+        KeyPair keyPair;
+        try {
+            KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("RSA");
+            keyPairGenerator.initialize(2048);
+            keyPair = keyPairGenerator.generateKeyPair();
+        }
+        catch (Exception ex) {
+            throw new IllegalStateException(ex);
+        }
+        return keyPair;
     }
 
     @Bean
     public ProviderSettings providerSettings() {
-        return ProviderSettings.builder().issuer("http://authserver:9000").build();
+        return ProviderSettings.builder()
+                .issuer("http://auth-server:9000")
+                .build();
     }
-
-
-
-
-
-
 }
+
